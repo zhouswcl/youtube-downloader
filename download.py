@@ -28,14 +28,6 @@ import yt_dlp
 
 # ── 可选依赖 ────────────────────────────────────────────────────────
 
-ALIYUNDRIVE_AVAILABLE = False
-try:
-    from aligo import Aligo
-
-    ALIYUNDRIVE_AVAILABLE = True
-except ImportError:
-    pass
-
 WHISPER_AVAILABLE = False
 try:
     import whisper
@@ -228,15 +220,17 @@ def whisper_transcribe(audio_path: str) -> list:
 # ── 阿里云盘上传 ──────────────────────────────────────────────────────
 
 def upload_to_aliyundrive(local_path: str) -> dict:
-    """上传文件到阿里云盘，返回上传结果"""
+    """
+    使用阿里云盘官方 API 上传文件（不依赖第三方库）
+    API 文档: https://www.aliyundrive.com/
+    """
+    import requests as req
+
     refresh_token = os.environ.get("ALIYUNDRIVE_REFRESH_TOKEN", "")
     parent_id = os.environ.get("ALIYUNDRIVE_PARENT_ID", "root")
 
     if not refresh_token:
         return {"success": False, "error": "ALIYUNDRIVE_REFRESH_TOKEN 未设置"}
-
-    if not ALIYUNDRIVE_AVAILABLE:
-        return {"success": False, "error": "aligo 未安装，无法上传"}
 
     if not os.path.isfile(local_path):
         return {"success": False, "error": f"文件不存在: {local_path}"}
@@ -247,10 +241,108 @@ def upload_to_aliyundrive(local_path: str) -> dict:
     log.info(f"正在上传到阿里云盘: {file_name} ({human_size(file_size)})...")
 
     try:
-        ali = Aligo(refresh_token=refresh_token)
-        ali.upload_file(local_path=local_path, parent_file_id=parent_id)
-        log.info(f"上传成功! 文件: {file_name}")
+        # Step 1: 用 refresh_token 获取 access_token
+        resp = req.post(
+            "https://api.aliyundrive.com/v2/account/token",
+            json={"grant_type": "refresh_token", "refresh_token": refresh_token},
+            headers={"Content-Type": "application/json"},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            return {"success": False, "error": f"获取 token 失败: HTTP {resp.status_code}: {resp.text[:200]}"}
 
+        token_data = resp.json()
+        access_token = token_data.get("access_token", "")
+        drive_id = token_data.get("default_drive_id", "")
+        new_refresh_token = token_data.get("refresh_token", refresh_token)
+
+        if not access_token:
+            return {"success": False, "error": f"获取 access_token 失败: {token_data.get('message', 'unknown')}"}
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
+
+        # Step 2: 创建文件请求（获取上传地址）
+        resp = req.post(
+            "https://api.aliyundrive.com/v2/file/create",
+            json={
+                "drive_id": drive_id,
+                "name": file_name,
+                "parent_file_id": parent_id,
+                "type": "file",
+                "size": file_size,
+                "check_name_mode": "auto_rename",
+            },
+            headers=headers,
+            timeout=30,
+        )
+        if resp.status_code != 201:
+            return {"success": False, "error": f"创建文件失败: HTTP {resp.status_code}: {resp.text[:200]}"}
+
+        file_data = resp.json()
+        file_id = file_data.get("file_id", "")
+        upload_url = file_data.get("upload_url", "")
+        rapid_upload = file_data.get("rapid_upload", False)
+
+        # 如果秒传成功，直接完成
+        if rapid_upload:
+            log.info(f"秒传成功! 文件: {file_name}")
+            return {"success": True, "file_name": file_name, "file_size": file_size}
+
+        # Step 3: 上传文件内容到 upload_url
+        if not upload_url:
+            # 可能需要分片上传
+            part_info_list = file_data.get("part_info_list", [])
+            if not part_info_list:
+                return {"success": False, "error": f"未获取到上传地址: {file_data}"}
+
+            # 逐片上传
+            with open(local_path, "rb") as f:
+                for part in part_info_list:
+                    part_url = part.get("upload_url", "")
+                    part_number = part.get("part_number", 1)
+
+                    # 读取对应分片
+                    if part_number == len(part_info_list):
+                        chunk = f.read()
+                    else:
+                        chunk = f.read(part.get("size", 0))
+
+                    put_resp = req.put(part_url, data=chunk, timeout=300)
+                    if put_resp.status_code not in (200, 201):
+                        return {
+                            "success": False,
+                            "error": f"分片 {part_number} 上传失败: HTTP {put_resp.status_code}",
+                        }
+
+            # Step 4: 完成上传
+            resp = req.post(
+                "https://api.aliyundrive.com/v2/file/complete",
+                json={"drive_id": drive_id, "file_id": file_id, "upload_id": file_data.get("upload_id", "")},
+                headers=headers,
+                timeout=30,
+            )
+            if resp.status_code not in (200, 201):
+                return {"success": False, "error": f"完成上传失败: {resp.text[:200]}"}
+
+        else:
+            # 单链接上传
+            file_size_upload = os.path.getsize(local_path)
+            with open(local_path, "rb") as f:
+                put_resp = req.put(upload_url, data=f, timeout=600)
+
+            if put_resp.status_code not in (200, 201, 204):
+                return {
+                    "success": False,
+                    "error": f"文件上传失败: HTTP {put_resp.status_code}",
+                }
+
+            # 非秒传情况下不需要 complete 步骤
+            log.info(f"文件上传 HTTP 状态: {put_resp.status_code}")
+
+        log.info(f"上传成功! 文件: {file_name}")
         return {"success": True, "file_name": file_name, "file_size": file_size}
 
     except Exception as e:
