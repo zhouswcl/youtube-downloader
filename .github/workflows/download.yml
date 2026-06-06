@@ -1,0 +1,65 @@
+name: YouTube Downloader
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'YouTube 视频链接'
+        required: true
+        type: string
+      type:
+        description: '下载类型'
+        required: true
+        default: 'video'
+        type: choice
+        options:
+          - video
+          - audio
+          - subtitle
+      quality:
+        description: '画质/音质 (video: best/1080p/720p/480p, audio: 192/128/64)'
+        required: false
+        default: 'best'
+        type: string
+
+# 避免并发冲突
+concurrency:
+  group: youtube-downloader-${{ github.event.inputs.url }}
+  cancel-in-progress: false
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 最大 6 小时（GitHub Actions 限制）
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements.txt
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 检查 ffmpeg（yt-dlp 需要）
+        run: |
+          which ffmpeg || sudo apt-get update && sudo apt-get install -y ffmpeg
+          ffmpeg -version | head -1
+
+      - name: 执行下载
+        env:
+          ALIYUNDRIVE_REFRESH_TOKEN: ${{ secrets.ALIYUNDRIVE_REFRESH_TOKEN }}
+          ALIYUNDRIVE_PARENT_ID: ${{ secrets.ALIYUNDRIVE_PARENT_ID }}
+        run: |
+          python download.py \
+            --url "${{ inputs.url }}" \
+            --type "${{ inputs.type }}" \
+            --quality "${{ inputs.quality }}" \
+            --json

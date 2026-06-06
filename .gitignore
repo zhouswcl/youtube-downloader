@@ -1,0 +1,9 @@
+*.pyc
+__pycache__/
+downloads/
+*.mp4
+*.mp3
+*.srt
+*.txt
+*.webm
+*.mkv
