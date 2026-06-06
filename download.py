@@ -30,8 +30,7 @@ import yt_dlp
 
 ALIYUNDRIVE_AVAILABLE = False
 try:
-    from aliyundrive_openapi import AliyunDrive
-    from aliyundrive_openapi.exceptions import AliyunDriveError
+    from aligo import Aligo
 
     ALIYUNDRIVE_AVAILABLE = True
 except ImportError:
@@ -237,7 +236,7 @@ def upload_to_aliyundrive(local_path: str) -> dict:
         return {"success": False, "error": "ALIYUNDRIVE_REFRESH_TOKEN 未设置"}
 
     if not ALIYUNDRIVE_AVAILABLE:
-        return {"success": False, "error": "aliyundrive-openapi 未安装，无法上传"}
+        return {"success": False, "error": "aligo 未安装，无法上传"}
 
     if not os.path.isfile(local_path):
         return {"success": False, "error": f"文件不存在: {local_path}"}
@@ -248,25 +247,14 @@ def upload_to_aliyundrive(local_path: str) -> dict:
     log.info(f"正在上传到阿里云盘: {file_name} ({human_size(file_size)})...")
 
     try:
-        drive = AliyunDrive(refresh_token=refresh_token)
-
-        # 获取根目录或指定目录的文件 ID
-        # parent_file_id = drive.get_file_id_by_path(parent_id) or parent_id
-
-        result = drive.upload_file(
-            local_path=local_path,
-            parent_file_id=parent_id,
-            # check_name_mode="auto_rename",  # 同名文件自动重命名
-        )
-
+        ali = Aligo(refresh_token=refresh_token)
+        ali.upload_file(local_path=local_path, parent_file_id=parent_id)
         log.info(f"上传成功! 文件: {file_name}")
-        return {"success": True, "file_name": file_name, "file_size": file_size, "drive_result": str(result)[:200]}
 
-    except AliyunDriveError as e:
-        log.error(f"阿里云盘上传失败: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": True, "file_name": file_name, "file_size": file_size}
+
     except Exception as e:
-        log.error(f"上传异常: {e}")
+        log.error(f"阿里云盘上传失败: {e}")
         return {"success": False, "error": str(e)}
 
 

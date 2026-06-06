@@ -1,5 +1,5 @@
 yt-dlp>=2024.12.0
-aliyundrive-openapi>=0.3.0
+aligo>=6.2.0
 deep-translator>=1.11.0
 
 # 可选：Whisper 语音识别（约 1.4GB 模型 + GPU 推荐）
