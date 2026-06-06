@@ -389,12 +389,14 @@ def _get_cookie_file() -> str | None:
         return None
     import tempfile
 
-    # 过滤空行和注释，确保格式干净
+    # 过滤空行和注释，但保留 #HttpOnly_ 开头的真实 cookie 行
     clean_lines = []
     seen_cookies = set()
     for line in cookies.strip().splitlines():
         line = line.strip()
-        if not line or line.startswith("#"):
+        if not line:
+            continue
+        if line.startswith("#") and not line.startswith("#HttpOnly_"):
             continue
         # 去重：Netscape 格式第6列是 cookie name
         parts = line.split("\t")
