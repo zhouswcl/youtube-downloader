@@ -4,6 +4,7 @@ downloads/
 *.mp4
 *.mp3
 *.srt
-*.txt
 *.webm
 *.mkv
+# 已下载的视频/音频文件
+yt_download_*/
