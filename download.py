@@ -388,10 +388,31 @@ def _get_cookie_file() -> str | None:
     if not cookies:
         return None
     import tempfile
+
+    # 过滤空行和注释，确保格式干净
+    clean_lines = []
+    seen_cookies = set()
+    for line in cookies.strip().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        # 去重：Netscape 格式第6列是 cookie name
+        parts = line.split("\t")
+        if len(parts) >= 6:
+            cookie_name = parts[5]
+            if cookie_name in seen_cookies:
+                continue
+            seen_cookies.add(cookie_name)
+        clean_lines.append(line)
+
+    # 还需要保留开头的 # Netscape... 声明行让 yt-dlp 识别格式
+    header = "# Netscape HTTP Cookie File\n# https://curl.haxx.se/rfc/cookie_spec.html\n"
+    content = header + "\n".join(clean_lines)
+
     f = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
-    f.write(cookies)
+    f.write(content)
     f.close()
-    log.info("已加载 YouTube Cookie")
+    log.info(f"已加载 YouTube Cookie ({len(clean_lines)} 条)")
     return f.name
 
 
