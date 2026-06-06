@@ -227,12 +227,10 @@ def upload_to_aliyundrive(local_path: str) -> dict:
     import requests as req
 
     refresh_token = os.environ.get("ALIYUNDRIVE_REFRESH_TOKEN", "")
-    parent_id = os.environ.get("ALIYUNDRIVE_PARENT_ID", "root")
+    parent_id = os.environ.get("ALIYUNDRIVE_PARENT_ID") or "root"
 
     if not refresh_token:
         return {"success": False, "error": "ALIYUNDRIVE_REFRESH_TOKEN 未设置"}
-
-    log.info(f"Token 长度: {len(refresh_token)} 字符，前20位: {refresh_token[:20]}...")
 
     if not os.path.isfile(local_path):
         return {"success": False, "error": f"文件不存在: {local_path}"}
