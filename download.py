@@ -382,6 +382,37 @@ def report_progress(d: dict, stdout_report: bool = True):
         sys.stdout.flush()
 
 
+def _get_cookie_file() -> str | None:
+    """如果有 YT_COOKIES 环境变量，写出到临时文件并返回路径"""
+    cookies = os.environ.get("YT_COOKIES", "")
+    if not cookies:
+        return None
+    import tempfile
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
+    f.write(cookies)
+    f.close()
+    log.info("已加载 YouTube Cookie")
+    return f.name
+
+
+def _build_base_opts(output_dir: str) -> dict:
+    """构建 yt-dlp 基础选项"""
+    opts = {
+        "outtmpl": os.path.join(output_dir, "%(title)s.%(ext)s"),
+        "progress_hooks": [report_progress],
+        "quiet": True,
+        "no_warnings": True,
+        "ignoreerrors": True,
+        "retries": 3,
+        "fragment_retries": 3,
+        "continuedl": True,
+    }
+    cookie_file = _get_cookie_file()
+    if cookie_file:
+        opts["cookiefile"] = cookie_file
+    return opts
+
+
 def download_video(url: str, quality: str, output_dir: str) -> str:
     """下载视频，返回最终文件路径"""
     fmt_map = {
@@ -404,11 +435,16 @@ def download_video(url: str, quality: str, output_dir: str) -> str:
         "fragment_retries": 3,
         "continuedl": True,
     }
+    cookie_file = _get_cookie_file()
+    if cookie_file:
+        ydl_opts["cookiefile"] = cookie_file
 
     log.info(f"开始下载视频 (质量: {quality})...")
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
+        if info is None:
+            raise Exception("yt-dlp 返回空结果，可能是机器人检测。请确保 YouTube Cookie 有效")
         title = info.get("title", "未知视频")
         safe_title = ydl.prepare_filename(info)
         final_path = safe_title.rsplit(".", 1)[0] + ".mp4"
@@ -445,10 +481,13 @@ def download_audio(url: str, quality: str, output_dir: str) -> str:
             {
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
-                "preferredquality": quality,  # 192, 128, 64
+                "preferredquality": quality,
             }
         ],
     }
+    cookie_file = _get_cookie_file()
+    if cookie_file:
+        ydl_opts["cookiefile"] = cookie_file
 
     log.info(f"开始下载音频 (质量: {quality}kbps)...")
 
@@ -491,6 +530,9 @@ def download_subtitle(url: str, output_dir: str) -> dict:
         "skip_download": True,
         "outtmpl": os.path.join(output_dir, "%(title)s.%(ext)s"),
     }
+    cookie_file = _get_cookie_file()
+    if cookie_file:
+        ydl_opts["cookiefile"] = cookie_file
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)

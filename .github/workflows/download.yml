@@ -55,6 +55,7 @@ jobs:
         env:
           ALIYUNDRIVE_REFRESH_TOKEN: ${{ secrets.ALIYUNDRIVE_REFRESH_TOKEN }}
           ALIYUNDRIVE_PARENT_ID: ${{ secrets.ALIYUNDRIVE_PARENT_ID }}
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
         run: |
           python download.py \
             --url "${{ inputs.url }}" \
