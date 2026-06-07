@@ -278,7 +278,7 @@ def find_folder_id(folder_name: str, access_token: str, drive_id: str) -> str | 
     return current_parent if current_parent != "root" else None
 
 
-CHUNK_SIZE = 10 * 1024 * 1024  # 分片大小：10MB
+CHUNK_SIZE = 5 * 1024 * 1024  # 分片大小：10MB
 CHUNKED_THRESHOLD = 5 * 1024 * 1024  # >5MB 的文件强制分片上传
 
 
@@ -288,7 +288,7 @@ def _upload_chunk_with_retry(part_url: str, chunk: bytes, part_number: int, max_
 
     for attempt in range(max_retries):
         try:
-            put_resp = req.put(part_url, data=chunk, timeout=120)
+            put_resp = req.put(part_url, data=chunk, timeout=300)
             if put_resp.status_code in (200, 201):
                 return True
             log.warning(
