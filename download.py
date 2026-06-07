@@ -571,16 +571,35 @@ def download_audio(url: str, quality: str, output_dir: str) -> str:
         "--audio-quality", audio_quality,
         "-o", os.path.join(output_dir, "%(title)s.%(ext)s"),
         "--no-playlist",
+        # 限流/重试参数 — 应对 HTTP 429 Too Many Requests
+        "--sleep-interval", "5",
+        "--max-sleep-interval", "30",
+        "--retries", "10",
+        "--fragment-retries", "10",
+        "--extractor-retries", "10",
+        "--throttled-rate", "100K",
         url,
     ])
 
     log.info(f"执行: {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-
-    if result.returncode != 0:
+    # 带重试循环，应对 429 等临时错误
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode == 0:
+            break
+        if "HTTP Error 429" in result.stderr:
+            wait = attempt * 30
+            log.warning(f"收到 429 限流，等待 {wait} 秒后重试 (第 {attempt}/{max_attempts} 次)...")
+            time.sleep(wait)
+            continue
+        # 其他错误直接报
         log.warning(f"yt-dlp 返回 {result.returncode}")
         log.warning(result.stderr[:300])
         raise Exception(f"yt-dlp 失败 (exit={result.returncode}): {result.stderr[:200]}")
+    else:
+        raise Exception(f"yt-dlp 失败（所有重试耗尽）: {result.stderr[:500]}")
+    # 处理成功情况
 
     # 查找生成的音频文件
     for ext in [".mp3", ".m4a", ".opus", ".webm", ".mka"]:
