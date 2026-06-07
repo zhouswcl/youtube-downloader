@@ -506,12 +506,12 @@ def _build_base_opts(output_dir: str) -> dict:
 def download_video(url: str, quality: str, output_dir: str) -> str:
     """下载视频，返回最终文件路径"""
     fmt_map = {
-        "best": "bestvideo*+bestaudio*/best*",
-        "1080p": "bestvideo*[height<=1080]+bestaudio*/best*[height<=1080]",
-        "720p": "bestvideo*[height<=720]+bestaudio*/best*[height<=720]",
-        "480p": "bestvideo*[height<=480]+bestaudio*/best*[height<=480]",
+        "best": "best*",
+        "1080p": "best*[height<=1080]",
+        "720p": "best*[height<=720]",
+        "480p": "best*[height<=480]",
     }
-    fmt = fmt_map.get(quality, "bestvideo+bestaudio/best")
+    fmt = fmt_map.get(quality, "best*")
 
     ydl_opts = {
         "format": fmt,
