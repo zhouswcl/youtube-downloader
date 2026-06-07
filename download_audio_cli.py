@@ -30,13 +30,15 @@ if cookie_content:
     f.write(content)
     f.close()
     cookie_file = f.name
-    print(f"Cookie 已写入: {len(fixed_lines)} 行")
+    print(f"Cookie 已写入: {len(fixed_lines)} 行 ({len(content)} 字节)")
 
 # 直接 yt-dlp 命令行下载（绕过 Python API 格式匹配问题）
 output_dir = tempfile.mkdtemp(prefix="yt_audio_")
 cmd = ["yt-dlp"]
 if cookie_file:
-    cmd.extend(["--cookies", cookie_file.name])
+    cmd.extend(["--cookies", cookie_file])
+else:
+    print("无 Cookie，尝试无认证下载")
 cmd.extend([
     "-x", "--audio-format", "mp3", "--audio-quality", f"{quality}K",
     "-o", os.path.join(output_dir, "%(title)s.%(ext)s"),
