@@ -1,5 +1,10 @@
 name: Diagnose
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'YouTube URL'
+        required: true
 jobs:
   list:
     runs-on: ubuntu-latest
@@ -8,6 +13,7 @@ jobs:
         with: {python-version: '3.11'}
       - run: pip install yt-dlp
       - run: |
+          echo "=== VIDEO INFO ==="
           yt-dlp --cookies-from-browser none --print "%(title)s | %(duration)s | %(age_limit)s | %(is_live)s | %(channel)s" "${{ github.event.inputs.url }}" 2>&1 || true
-          echo "---LIST FORMATS---"
+          echo "=== LIST FORMATS ==="
           yt-dlp --cookies-from-browser none -F "${{ github.event.inputs.url }}" 2>&1 || true

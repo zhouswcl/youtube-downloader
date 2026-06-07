@@ -555,8 +555,8 @@ def download_video(url: str, quality: str, output_dir: str) -> str:
 
 def download_audio(url: str, quality: str, output_dir: str) -> str:
     """下载音频并转 MP3，返回最终文件路径"""
-    # yt-dlp 格式选择: bestaudio* 选最佳音频，带 * 表示也允许非最佳
-    fmt = "bestaudio*/best"
+    # 选择最佳音视频格式：从视频中提取音频（兼容无纯音频流的视频）
+    fmt = "best[acodec!=none]/best"
 
     # FFmpegExtractAudio quality: "0"=best, "5"=default, or kbps like "128"
     # 如果传入 "best"，转为 "0"（最佳）
