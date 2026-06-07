@@ -550,7 +550,14 @@ def download_video(url: str, quality: str, output_dir: str) -> str:
 
 def download_audio(url: str, quality: str, output_dir: str) -> str:
     """下载音频并转 MP3，返回最终文件路径"""
-    fmt = "bestaudio/best"
+    # yt-dlp 格式选择: bestaudio* 选最佳音频，带 * 表示也允许非最佳
+    fmt = "bestaudio*/best"
+
+    # FFmpegExtractAudio quality: "0"=best, "5"=default, or kbps like "128"
+    # 如果传入 "best"，转为 "0"（最佳）
+    audio_quality = quality
+    if audio_quality in ("best", "0", ""):
+        audio_quality = "0"
 
     ydl_opts = {
         "format": fmt,
@@ -566,7 +573,7 @@ def download_audio(url: str, quality: str, output_dir: str) -> str:
             {
                 "key": "FFmpegExtractAudio",
                 "preferredcodec": "mp3",
-                "preferredquality": quality,
+                "preferredquality": audio_quality,
             }
         ],
     }
@@ -574,7 +581,7 @@ def download_audio(url: str, quality: str, output_dir: str) -> str:
     if cookie_file:
         ydl_opts["cookiefile"] = cookie_file
 
-    log.info(f"开始下载音频 (质量: {quality}kbps)...")
+    log.info(f"开始下载音频 (质量: {audio_quality})...")
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)
