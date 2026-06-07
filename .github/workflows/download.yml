@@ -53,6 +53,19 @@ jobs:
           which ffmpeg || sudo apt-get update && sudo apt-get install -y ffmpeg
           ffmpeg -version | head -1
 
+      - name: 调试 Cookie 格式
+        env:
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+        run: |
+          python3 -c '
+import os
+d = os.environ.get("YT_COOKIES", "")
+l = d.splitlines()
+print("len=%d lines=%d tab=%s cr=%s" % (len(d), len(l), chr(9) in d, chr(13) in d))
+for i in range(min(3, len(l))):
+    print("L%d: %r" % (i, l[i][:80]))
+'
+
       - name: 执行下载
         env:
           ALIYUNDRIVE_REFRESH_TOKEN: ${{ secrets.ALIYUNDRIVE_REFRESH_TOKEN }}
