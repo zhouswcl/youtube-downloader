@@ -52,11 +52,19 @@ jobs:
         run: |
           which ffmpeg || sudo apt-get update && sudo apt-get install -y ffmpeg
           ffmpeg -version | head -1
-          # 新版 yt-dlp 需要 JavaScript 运行时（Deno）
           which deno || (curl -fsSL https://deno.land/install.sh | sh 2>&1 | tail -3)
           echo "$HOME/.deno/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.deno/bin:$PATH"
           deno --version | head -1
+
+      - name: 诊断 — 检查视频可访问性
+        run: |
+          echo "--- yt-dlp version ---"
+          yt-dlp --version
+          echo "--- 诊断视频 ---"
+          python diagnose.py --url "https://youtu.be/Bk9o62xQRmA"
+        env:
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
 
       - name: 执行下载
         env:
