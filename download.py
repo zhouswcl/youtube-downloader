@@ -562,7 +562,12 @@ def download_audio(url: str, quality: str, output_dir: str) -> str:
         audio_quality = "0"
 
     # 第一步：提取视频信息，看看有什么格式可用
-    base_opts = {"quiet": True, "no_warnings": True, "ignoreerrors": True}
+    base_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "ignoreerrors": True,
+        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
+    }
     cookie_file = _get_cookie_file()
     if cookie_file:
         base_opts["cookiefile"] = cookie_file
