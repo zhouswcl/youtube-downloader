@@ -447,7 +447,6 @@ def report_progress(d: dict, stdout_report: bool = True):
 def _get_cookie_file() -> str | None:
     """返回 cookie 文件路径。
     优先顺序: YT_COOKIE_FILE 环境变量 (文件已存在) → YT_COOKIES 环境变量 (临时写出)
-    注意: 内容原样写出，不经过任何过滤/拼装，交给 yt-dlp 自行解析。
     """
     # 方式1: 直接指定文件路径（推荐）
     cookie_file = os.environ.get("YT_COOKIE_FILE", "")
@@ -461,11 +460,28 @@ def _get_cookie_file() -> str | None:
         return None
 
     import tempfile
+
+    # 修复 GitHub Actions env var TAB→空格的问题：
+    # Netscape cookie 文件要求 TAB 分隔，但 env var 可能把 TAB 转成空格。
+    # 对每行按任意空白分割前6个字段，再用 TAB 重新连接。
+    fixed_lines = []
+    for line in cookies.splitlines():
+        if not line.strip() or line.startswith("#"):
+            fixed_lines.append(line)
+            continue
+        # split(None, 6) 按任意空白分，最多7段（domain flag path secure expires name value）
+        parts = line.split(None, 6)
+        if len(parts) >= 7:
+            fixed_lines.append("\t".join(parts))
+        else:
+            fixed_lines.append(line)
+
+    content = "\n".join(fixed_lines)
+
     f = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
-    # 原样写出，不处理不过滤 — yt-dlp 自己会解析 Netscape 格式
-    f.write(cookies)
+    f.write(content)
     f.close()
-    log.info(f"已加载 Cookie（{len(cookies)} 字节）")
+    log.info(f"已加载 Cookie（{len(content)} 字节, {len(fixed_lines)} 行）")
     return f.name
 
 
