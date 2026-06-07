@@ -445,7 +445,16 @@ def report_progress(d: dict, stdout_report: bool = True):
 
 
 def _get_cookie_file() -> str | None:
-    """如果有 YT_COOKIES 环境变量，写出到临时文件并返回路径"""
+    """返回 cookie 文件路径。
+    优先顺序: YT_COOKIE_FILE 环境变量 (文件已存在) → YT_COOKIES 环境变量 (临时写出)
+    """
+    # 方式1: 直接指定文件路径（推荐，避免换行符丢失）
+    cookie_file = os.environ.get("YT_COOKIE_FILE", "")
+    if cookie_file and os.path.isfile(cookie_file):
+        log.info(f"已加载 Cookie 文件: {cookie_file}")
+        return cookie_file
+
+    # 方式2: 从环境变量内容写出（备选）
     cookies = os.environ.get("YT_COOKIES", "")
     if not cookies:
         return None

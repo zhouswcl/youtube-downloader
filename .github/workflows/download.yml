@@ -27,7 +27,6 @@ on:
         default: ''
         type: string
 
-# 避免并发冲突
 concurrency:
   group: youtube-downloader-${{ github.event.inputs.url }}
   cancel-in-progress: false
@@ -35,14 +34,12 @@ concurrency:
 jobs:
   download:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 最大 6 小时（GitHub Actions 限制）
+    timeout-minutes: 360
 
     steps:
-      - name: 检出仓库
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: 设置 Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -51,16 +48,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 检查 ffmpeg（yt-dlp 需要）
+      - name: 检查 ffmpeg
         run: |
           which ffmpeg || sudo apt-get update && sudo apt-get install -y ffmpeg
           ffmpeg -version | head -1
+
+      - name: 解码 Cookie 文件（base64 -> 纯文本）
+        env:
+          YT_B64: ${{ secrets.YT_COOKIES_B64 }}
+        run: |
+          echo "$YT_B64" | base64 -d > /tmp/yt_cookies.txt
+          echo "Cookie 已解码: $(wc -l < /tmp/yt_cookies.txt) 行, $(wc -c < /tmp/yt_cookies.txt) 字节"
 
       - name: 执行下载
         env:
           ALIYUNDRIVE_REFRESH_TOKEN: ${{ secrets.ALIYUNDRIVE_REFRESH_TOKEN }}
           ALIYUNDRIVE_PARENT_ID: ${{ secrets.ALIYUNDRIVE_PARENT_ID }}
-          YT_COOKIES: ${{ secrets.YT_COOKIES }}
+          YT_COOKIE_FILE: /tmp/yt_cookies.txt
         run: |
           python download.py \
             --url "${{ inputs.url }}" \
