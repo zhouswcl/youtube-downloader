@@ -623,9 +623,8 @@ def download_subtitle(url: str, output_dir: str) -> dict:
         "writesubtitles": True,
         "writeautomaticsubs": True,
         "subtitleslangs": ["zh-Hans", "zh-Hant", "en"],
-        "subtitlesformat": "vtt",
+        "format": "none",  # 不选视频格式，只取字幕
         "convertsubtitles": "srt",
-        "format": "worst",  # 避免 format 校验报错
         "skip_download": True,
         "outtmpl": os.path.join(output_dir, "%(title)s.%(ext)s"),
     }
