@@ -278,10 +278,46 @@ def find_folder_id(folder_name: str, access_token: str, drive_id: str) -> str | 
     return current_parent if current_parent != "root" else None
 
 
+CHUNK_SIZE = 10 * 1024 * 1024  # 分片大小：10MB
+CHUNKED_THRESHOLD = 5 * 1024 * 1024  # >5MB 的文件强制分片上传
+
+
+def _upload_chunk_with_retry(part_url: str, chunk: bytes, part_number: int, max_retries: int = 3) -> bool:
+    """上传单个分片，含重试逻辑"""
+    import requests as req
+
+    for attempt in range(max_retries):
+        try:
+            put_resp = req.put(part_url, data=chunk, timeout=120)
+            if put_resp.status_code in (200, 201):
+                return True
+            log.warning(
+                f"分片 {part_number} 返回 HTTP {put_resp.status_code}，"
+                f"重试 ({attempt + 1}/{max_retries})..."
+            )
+        except Exception as e:
+            if attempt < max_retries - 1:
+                wait = (attempt + 1) * 10
+                log.warning(
+                    f"分片 {part_number} 上传异常: {e}，{wait}秒后重试 "
+                    f"({attempt + 2}/{max_retries})..."
+                )
+                time.sleep(wait)
+            else:
+                log.error(f"分片 {part_number} 上传失败（已重试 {max_retries} 次）: {e}")
+                return False
+    return False
+
+
 def upload_to_aliyundrive(local_path: str, parent_id: str | None = None) -> dict:
     """
     使用阿里云盘官方 API 上传文件（不依赖第三方库）
     API 文档: https://www.aliyundrive.com/
+
+    改进:
+      - >5MB 文件强制分片上传，每片10MB
+      - 每片独立超时120s，最多重试3次
+      - 大幅降低跨境连接超时的概率
 
     参数:
       parent_id: 目标文件夹 ID，为 None 时从环境变量 ALIYUNDRIVE_PARENT_ID 或 "root"
@@ -312,98 +348,139 @@ def upload_to_aliyundrive(local_path: str, parent_id: str | None = None) -> dict
             timeout=30,
         )
         if resp.status_code != 200:
-            return {"success": False, "error": f"获取 token 失败: HTTP {resp.status_code}: {resp.text[:200]}"}
+            return {
+                "success": False,
+                "error": f"获取 token 失败: HTTP {resp.status_code}: {resp.text[:200]}",
+            }
 
         token_data = resp.json()
         access_token = token_data.get("access_token", "")
         drive_id = token_data.get("default_drive_id", "")
-        new_refresh_token = token_data.get("refresh_token", refresh_token)
-
         if not access_token:
-            return {"success": False, "error": f"获取 access_token 失败: {token_data.get('message', 'unknown')}"}
+            return {
+                "success": False,
+                "error": f"获取 access_token 失败: {token_data.get('message', 'unknown')}",
+            }
 
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
         }
 
-        # Step 2: 创建文件请求（获取上传地址）
+        # Step 2: 创建文件请求 → 大文件主动请求分片
+        use_chunked = file_size > CHUNKED_THRESHOLD
+        create_body = {
+            "drive_id": drive_id,
+            "name": file_name,
+            "parent_file_id": parent_id,
+            "type": "file",
+            "size": file_size,
+            "check_name_mode": "auto_rename",
+        }
+        if use_chunked:
+            part_count = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
+            create_body["part_info_list"] = [
+                {"part_number": i + 1} for i in range(part_count)
+            ]
+            log.info(
+                f"使用分片上传: {part_count} 片 × {human_size(CHUNK_SIZE)}"
+            )
+
         resp = req.post(
             "https://api.aliyundrive.com/v2/file/create",
-            json={
-                "drive_id": drive_id,
-                "name": file_name,
-                "parent_file_id": parent_id,
-                "type": "file",
-                "size": file_size,
-                "check_name_mode": "auto_rename",
-            },
+            json=create_body,
             headers=headers,
             timeout=30,
         )
         if resp.status_code != 201:
-            return {"success": False, "error": f"创建文件失败: HTTP {resp.status_code}: {resp.text[:200]}"}
+            return {
+                "success": False,
+                "error": f"创建文件失败: HTTP {resp.status_code}: {resp.text[:200]}",
+            }
 
         file_data = resp.json()
         file_id = file_data.get("file_id", "")
-        upload_url = file_data.get("upload_url", "")
         rapid_upload = file_data.get("rapid_upload", False)
 
-        # 如果秒传成功，直接完成
+        # 秒传命中
         if rapid_upload:
             log.info(f"秒传成功! 文件: {file_name}")
             return {"success": True, "file_name": file_name, "file_size": file_size}
 
-        # Step 3: 上传文件内容到 upload_url
-        if not upload_url:
-            # 可能需要分片上传
-            part_info_list = file_data.get("part_info_list", [])
-            if not part_info_list:
-                return {"success": False, "error": f"未获取到上传地址: {file_data}"}
+        # Step 3: 分片或单链接上传
+        part_info_list = file_data.get("part_info_list", [])
+        upload_url = file_data.get("upload_url", "")
 
-            # 逐片上传
+        if use_chunked and part_info_list:
+            # ── 分片上传（逐片重试） ──
             with open(local_path, "rb") as f:
                 for part in part_info_list:
                     part_url = part.get("upload_url", "")
                     part_number = part.get("part_number", 1)
 
-                    # 读取对应分片
+                    # 读取本片数据（最后一片读剩余全部）
                     if part_number == len(part_info_list):
                         chunk = f.read()
                     else:
-                        chunk = f.read(part.get("size", 0))
+                        chunk = f.read(CHUNK_SIZE)
 
-                    put_resp = req.put(part_url, data=chunk, timeout=300)
-                    if put_resp.status_code not in (200, 201):
+                    ok = _upload_chunk_with_retry(part_url, chunk, part_number)
+                    if not ok:
                         return {
                             "success": False,
-                            "error": f"分片 {part_number} 上传失败: HTTP {put_resp.status_code}",
+                            "error": f"分片 {part_number} 上传失败（重试耗尽）",
                         }
 
-            # Step 4: 完成上传
+            # 完成上传
             resp = req.post(
                 "https://api.aliyundrive.com/v2/file/complete",
-                json={"drive_id": drive_id, "file_id": file_id, "upload_id": file_data.get("upload_id", "")},
+                json={
+                    "drive_id": drive_id,
+                    "file_id": file_id,
+                    "upload_id": file_data.get("upload_id", ""),
+                },
                 headers=headers,
                 timeout=30,
             )
             if resp.status_code not in (200, 201):
-                return {"success": False, "error": f"完成上传失败: {resp.text[:200]}"}
-
-        else:
-            # 单链接上传
-            file_size_upload = os.path.getsize(local_path)
-            with open(local_path, "rb") as f:
-                put_resp = req.put(upload_url, data=f, timeout=600)
-
-            if put_resp.status_code not in (200, 201, 204):
                 return {
                     "success": False,
-                    "error": f"文件上传失败: HTTP {put_resp.status_code}",
+                    "error": f"完成上传失败: {resp.text[:200]}",
                 }
 
-            # 非秒传情况下不需要 complete 步骤
-            log.info(f"文件上传 HTTP 状态: {put_resp.status_code}")
+        elif upload_url:
+            # ── 小文件单链接上传（含重试） ──
+            last_error = ""
+            for attempt in range(3):
+                try:
+                    with open(local_path, "rb") as f:
+                        put_resp = req.put(upload_url, data=f, timeout=600)
+                    if put_resp.status_code in (200, 201, 204):
+                        log.info(f"单链接上传成功: {file_name}")
+                        return {
+                            "success": True,
+                            "file_name": file_name,
+                            "file_size": file_size,
+                        }
+                    last_error = f"HTTP {put_resp.status_code}"
+                except Exception as e:
+                    last_error = str(e)
+                    if attempt < 2:
+                        wait = (attempt + 1) * 15
+                        log.warning(
+                            f"上传超时，{wait}秒后重试 ({attempt + 2}/3)..."
+                        )
+                        time.sleep(wait)
+            return {
+                "success": False,
+                "error": f"上传失败（已重试3次）: {last_error}",
+            }
+
+        else:
+            return {
+                "success": False,
+                "error": f"未获取到上传地址: {file_data}",
+            }
 
         log.info(f"上传成功! 文件: {file_name}")
         return {"success": True, "file_name": file_name, "file_size": file_size}
