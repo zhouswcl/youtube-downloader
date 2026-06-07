@@ -43,6 +43,13 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: 缓存 Whisper 模型
+        uses: actions/cache@v4
+        id: whisper-cache
+        with:
+          path: ~/.cache/whisper/
+          key: whisper-base-v3
+
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip

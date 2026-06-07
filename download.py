@@ -632,70 +632,81 @@ def download_subtitle(url: str, output_dir: str) -> dict:
     if cookie_file:
         ydl_opts["cookiefile"] = cookie_file
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        title = info.get("title", "未知视频")
-        safe_title = yt_dlp.YoutubeDL(ydl_opts).prepare_filename(info)
-        title_base = os.path.basename(safe_title).rsplit(".", 1)[0]
+    title = "未知视频"
+    title_base = None
+    yt_subtitles_found = False
 
-    # 查找下载的字幕文件
-    srt_files = [
-        f for f in os.listdir(output_dir) if f.endswith(".srt") and f.startswith(title_base)
-    ]
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            if info:
+                title = info.get("title", "未知视频")
+                safe_title = yt_dlp.YoutubeDL(ydl_opts).prepare_filename(info)
+                title_base = os.path.basename(safe_title).rsplit(".", 1)[0]
 
-    if srt_files:
-        # 有字幕，选择最佳语言
-        chosen_srt = None
-        chosen_lang = "unknown"
-        for target in ["zh-Hans", "zh-Hant", "en"]:
-            matches = [f for f in srt_files if f".{target}." in f]
-            if matches:
-                chosen_srt = os.path.join(output_dir, matches[0])
-                chosen_lang = target
-                break
-        if not chosen_srt:
-            chosen_srt = os.path.join(output_dir, srt_files[0])
-            parts = os.path.basename(chosen_srt).rsplit(".", 2)
-            chosen_lang = parts[-2] if len(parts) >= 3 else "unknown"
+        # 查找下载的字幕文件
+        if title_base:
+            srt_files = [
+                f for f in os.listdir(output_dir) if f.endswith(".srt") and f.startswith(title_base)
+            ]
 
-        log.info(f"找到字幕 (语言: {chosen_lang})")
+            if srt_files:
+                yt_subtitles_found = True
+                # 有字幕，选择最佳语言
+                chosen_srt = None
+                chosen_lang = "unknown"
+                for target in ["zh-Hans", "zh-Hant", "en"]:
+                    matches = [f for f in srt_files if f".{target}." in f]
+                    if matches:
+                        chosen_srt = os.path.join(output_dir, matches[0])
+                        chosen_lang = target
+                        break
+                if not chosen_srt:
+                    chosen_srt = os.path.join(output_dir, srt_files[0])
+                    parts = os.path.basename(chosen_srt).rsplit(".", 2)
+                    chosen_lang = parts[-2] if len(parts) >= 3 else "unknown"
 
-        # 解析 + 翻译
-        segments = parse_srt(chosen_srt)
-        if not segments:
-            raise Exception(f"字幕文件解析失败: {chosen_srt}")
+                log.info(f"找到 YouTube 字幕 (语言: {chosen_lang})")
 
-        translated = False
-        if not chosen_lang.startswith("zh"):
-            log.info("正在翻译字幕为中文...")
-            segments = translate_segments(segments, chosen_lang)
-            translated = True
+                # 解析 + 翻译
+                segments = parse_srt(chosen_srt)
+                if not segments:
+                    raise Exception(f"字幕文件解析失败: {chosen_srt}")
 
-        # 保存 .srt
-        srt_output = os.path.join(output_dir, f"{title_base}.zh-Hans.srt")
-        write_srt(segments, srt_output)
+                translated = False
+                if not chosen_lang.startswith("zh"):
+                    log.info("正在翻译字幕为中文...")
+                    segments = translate_segments(segments, chosen_lang)
+                    translated = True
 
-        # 保存 .txt
-        txt_output = os.path.join(output_dir, f"{title_base}.zh-Hans.txt")
-        write_txt(segments, txt_output)
+                # 保存 .srt
+                srt_output = os.path.join(output_dir, f"{title_base}.zh-Hans.srt")
+                write_srt(segments, srt_output)
 
-        # 清理临时字幕文件
-        for f in srt_files:
-            fp = os.path.join(output_dir, f)
-            if fp != srt_output:
-                try:
-                    os.remove(fp)
-                except OSError:
-                    pass
+                # 保存 .txt
+                txt_output = os.path.join(output_dir, f"{title_base}.zh-Hans.txt")
+                write_txt(segments, txt_output)
 
-        return {
-            "title": title,
-            "srt_file": srt_output,
-            "txt_file": txt_output,
-            "source_lang": chosen_lang,
-            "translated": translated,
-            "from_speech": False,
-        }
+                # 清理临时字幕文件
+                for f in srt_files:
+                    fp = os.path.join(output_dir, f)
+                    if fp != srt_output:
+                        try:
+                            os.remove(fp)
+                        except OSError:
+                            pass
+
+                return {
+                    "title": title,
+                    "srt_file": srt_output,
+                    "txt_file": txt_output,
+                    "source_lang": chosen_lang,
+                    "translated": translated,
+                    "from_speech": False,
+                }
+    except Exception as e:
+        log.warning(f"YouTube 字幕提取失败: {e}，尝试 Whisper 语音识别...")
+        # 回退到 Whisper
 
     # 第二步：没有字幕 → 尝试 Whisper 语音识别
     if WHISPER_AVAILABLE:
