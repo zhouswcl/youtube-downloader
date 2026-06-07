@@ -53,18 +53,11 @@ jobs:
           which ffmpeg || sudo apt-get update && sudo apt-get install -y ffmpeg
           ffmpeg -version | head -1
 
-      - name: 解码 Cookie 文件（base64 -> 纯文本）
-        env:
-          YT_B64: ${{ secrets.YT_COOKIES_B64 }}
-        run: |
-          echo "$YT_B64" | base64 -d > /tmp/yt_cookies.txt
-          echo "Cookie 已解码: $(wc -l < /tmp/yt_cookies.txt) 行, $(wc -c < /tmp/yt_cookies.txt) 字节"
-
       - name: 执行下载
         env:
           ALIYUNDRIVE_REFRESH_TOKEN: ${{ secrets.ALIYUNDRIVE_REFRESH_TOKEN }}
           ALIYUNDRIVE_PARENT_ID: ${{ secrets.ALIYUNDRIVE_PARENT_ID }}
-          YT_COOKIE_FILE: /tmp/yt_cookies.txt
+          YT_COOKIES: ${{ secrets.YT_COOKIES }}
         run: |
           python download.py \
             --url "${{ inputs.url }}" \

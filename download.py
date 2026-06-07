@@ -447,8 +447,9 @@ def report_progress(d: dict, stdout_report: bool = True):
 def _get_cookie_file() -> str | None:
     """返回 cookie 文件路径。
     优先顺序: YT_COOKIE_FILE 环境变量 (文件已存在) → YT_COOKIES 环境变量 (临时写出)
+    注意: 内容原样写出，不经过任何过滤/拼装，交给 yt-dlp 自行解析。
     """
-    # 方式1: 直接指定文件路径（推荐，避免换行符丢失）
+    # 方式1: 直接指定文件路径（推荐）
     cookie_file = os.environ.get("YT_COOKIE_FILE", "")
     if cookie_file and os.path.isfile(cookie_file):
         log.info(f"已加载 Cookie 文件: {cookie_file}")
@@ -458,34 +459,13 @@ def _get_cookie_file() -> str | None:
     cookies = os.environ.get("YT_COOKIES", "")
     if not cookies:
         return None
+
     import tempfile
-
-    # 过滤空行和注释，但保留 #HttpOnly_ 开头的真实 cookie 行
-    clean_lines = []
-    seen_cookies = set()
-    for line in cookies.strip().splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        if line.startswith("#") and not line.startswith("#HttpOnly_"):
-            continue
-        # 去重：Netscape 格式第6列是 cookie name
-        parts = line.split("\t")
-        if len(parts) >= 6:
-            cookie_name = parts[5]
-            if cookie_name in seen_cookies:
-                continue
-            seen_cookies.add(cookie_name)
-        clean_lines.append(line)
-
-    # 还需要保留开头的 # Netscape... 声明行让 yt-dlp 识别格式
-    header = "# Netscape HTTP Cookie File\n# https://curl.haxx.se/rfc/cookie_spec.html\n"
-    content = header + "\n".join(clean_lines)
-
     f = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
-    f.write(content)
+    # 原样写出，不处理不过滤 — yt-dlp 自己会解析 Netscape 格式
+    f.write(cookies)
     f.close()
-    log.info(f"已加载 YouTube Cookie ({len(clean_lines)} 条)")
+    log.info(f"已加载 Cookie（{len(cookies)} 字节）")
     return f.name
 
 
