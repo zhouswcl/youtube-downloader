@@ -21,6 +21,11 @@ on:
         required: false
         default: 'best'
         type: string
+      upload-folder:
+        description: '阿里云盘上传目录（名称，如 "YouTube下载"）'
+        required: false
+        default: ''
+        type: string
 
 # 避免并发冲突
 concurrency:
@@ -61,4 +66,5 @@ jobs:
             --url "${{ inputs.url }}" \
             --type "${{ inputs.type }}" \
             --quality "${{ inputs.quality }}" \
+            --upload-folder "${{ inputs.upload-folder || '' }}" \
             --json

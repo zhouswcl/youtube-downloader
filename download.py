@@ -219,15 +219,77 @@ def whisper_transcribe(audio_path: str) -> list:
 
 # ── 阿里云盘上传 ──────────────────────────────────────────────────────
 
-def upload_to_aliyundrive(local_path: str) -> dict:
+def find_folder_id(folder_name: str, access_token: str, drive_id: str) -> str | None:
+    """
+    在阿里云盘根目录下递归查找文件夹，返回其 file_id
+    支持子路径: "Music/YouTube" 或 "我的资源/视频"
+    """
+    import requests as req
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+
+    # 支持子路径: 按 / 分割逐级查找
+    parts = folder_name.strip("/").split("/")
+    current_parent = "root"
+
+    for part in parts:
+        if not part:
+            continue
+        found = False
+        marker = None
+        while True:
+            body = {
+                "drive_id": drive_id,
+                "parent_file_id": current_parent,
+                "limit": 100,
+            }
+            if marker:
+                body["marker"] = marker
+            resp = req.post(
+                "https://api.aliyundrive.com/v2/file/list",
+                headers=headers,
+                json=body,
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                log.error(f"查询文件夹失败: HTTP {resp.status_code}")
+                return None
+
+            data = resp.json()
+            for item in data.get("items", []):
+                if item["type"] == "folder" and item["name"] == part:
+                    current_parent = item["file_id"]
+                    found = True
+                    break
+            if found:
+                break
+            marker = data.get("next_marker", "")
+            if not marker:
+                break
+
+        if not found:
+            log.warning(f"未找到文件夹 '{part}'（在 {current_parent} 下），使用默认目录")
+            return None
+
+    return current_parent if current_parent != "root" else None
+
+
+def upload_to_aliyundrive(local_path: str, parent_id: str | None = None) -> dict:
     """
     使用阿里云盘官方 API 上传文件（不依赖第三方库）
     API 文档: https://www.aliyundrive.com/
+
+    参数:
+      parent_id: 目标文件夹 ID，为 None 时从环境变量 ALIYUNDRIVE_PARENT_ID 或 "root"
     """
     import requests as req
 
     refresh_token = os.environ.get("ALIYUNDRIVE_REFRESH_TOKEN", "")
-    parent_id = os.environ.get("ALIYUNDRIVE_PARENT_ID") or "root"
+    if parent_id is None:
+        parent_id = os.environ.get("ALIYUNDRIVE_PARENT_ID") or "root"
 
     if not refresh_token:
         return {"success": False, "error": "ALIYUNDRIVE_REFRESH_TOKEN 未设置"}
@@ -722,6 +784,12 @@ def parse_args():
         help="不上传到阿里云盘（仅下载到本地）",
     )
     parser.add_argument(
+        "--upload-folder",
+        type=str,
+        default="",
+        help="上传到指定文件夹（名称，如 'YouTube下载'），支持子路径 'Music/YouTube'",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="以 JSON 格式输出结果（供 workflow 解析）",
@@ -803,7 +871,33 @@ def main():
                 upload_target = result.get("srt_file", "")
 
             if upload_target and os.path.isfile(upload_target):
-                upload_result = upload_to_aliyundrive(upload_target)
+                # 处理 --upload-folder: 根据名称查找文件夹 ID
+                resolved_parent_id = None
+                if args.upload_folder:
+                    log.info(f"📂 查找阿里云盘文件夹: {args.upload_folder}")
+                    # 先登录获取 access_token
+                    import requests as req
+                    refresh_token = os.environ.get("ALIYUNDRIVE_REFRESH_TOKEN", "")
+                    if refresh_token:
+                        resp = req.post(
+                            "https://api.aliyundrive.com/v2/account/token",
+                            json={"grant_type": "refresh_token", "refresh_token": refresh_token},
+                            headers={"Content-Type": "application/json"},
+                            timeout=30,
+                        )
+                        if resp.status_code == 200:
+                            token_data = resp.json()
+                            access_token = token_data.get("access_token", "")
+                            drive_id = token_data.get("default_drive_id", "")
+                            if access_token and drive_id:
+                                folder_id = find_folder_id(args.upload_folder, access_token, drive_id)
+                                if folder_id:
+                                    resolved_parent_id = folder_id
+                                    log.info(f"✓ 找到文件夹 '{args.upload_folder}' (id: {folder_id})")
+                                else:
+                                    log.warning(f"⚠ 未找到文件夹 '{args.upload_folder}'，上传到默认目录")
+
+                upload_result = upload_to_aliyundrive(upload_target, parent_id=resolved_parent_id)
                 result["upload"] = upload_result
                 if upload_result.get("success"):
                     log.info(f"✓ 文件已上传到阿里云盘")
