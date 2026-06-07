@@ -566,7 +566,6 @@ def download_audio(url: str, quality: str, output_dir: str) -> str:
         "quiet": True,
         "no_warnings": True,
         "ignoreerrors": True,
-        "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
     }
     cookie_file = _get_cookie_file()
     if cookie_file:
