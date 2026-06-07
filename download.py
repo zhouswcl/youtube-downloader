@@ -729,7 +729,6 @@ def download_subtitle(url: str, output_dir: str) -> dict:
     cmd.extend([
         "--skip-download",
         "--write-subs",
-        "--write-auto-subs",
         "--sub-langs", "zh-Hans,zh-Hant,en,zh",
         "--convert-subs", "srt",
         "-o", os.path.join(output_dir, "%(title)s.%(ext)s"),
