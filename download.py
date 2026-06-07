@@ -580,7 +580,7 @@ def download_audio(url: str, quality: str, output_dir: str) -> str:
         "--throttled-rate", "100K",
         # 地区限制绕过 — 视频可能仅限中国区域观看
         "--geo-bypass",
-        "--extractor-args", "youtube:player_client=android",
+        "--extractor-args", "youtube:player_client=web_safari",
         url,
     ])
 
