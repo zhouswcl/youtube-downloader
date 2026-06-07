@@ -584,7 +584,6 @@ def _build_common_opts(cookie_file: str | None = None) -> list[str]:
         "--extractor-retries", "10",
         "--throttled-rate", "100K",
         "--geo-bypass",
-        "--remote-component-attempts", "3",
         "--no-playlist",
     ])
     return opts
@@ -739,8 +738,6 @@ def download_subtitle(url: str, output_dir: str) -> dict:
         "--referer", "https://www.google.com/",
         "--sleep-interval", "3",
         "--geo-bypass",
-        # 允许 yt-dlp 下载远程 JS 挑战求解器（新版需要）
-        "--remote-component-attempts", "3",
         url,
     ])
 
@@ -751,7 +748,7 @@ def download_subtitle(url: str, output_dir: str) -> dict:
     if result.returncode != 0:
         log.warning(f"yt-dlp 返回 {result.returncode}: {result.stderr[:200]}")
         # 用 --list-subs 看看这个视频有哪些字幕
-        list_cmd = ["yt-dlp", "--list-subs", "--no-playlist", "--user-agent", REAL_USER_AGENT, "--remote-component-attempts", "3"]
+        list_cmd = ["yt-dlp", "--list-subs", "--no-playlist", "--user-agent", REAL_USER_AGENT]
         if cookie_file:
             list_cmd.extend(["--cookies", cookie_file])
         list_cmd.append(url)

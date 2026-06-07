@@ -65,6 +65,8 @@ jobs:
           ALIYUNDRIVE_REFRESH_TOKEN: ${{ secrets.ALIYUNDRIVE_REFRESH_TOKEN }}
           ALIYUNDRIVE_PARENT_ID: ${{ secrets.ALIYUNDRIVE_PARENT_ID }}
           YT_COOKIES: ${{ secrets.YT_COOKIES }}
+          PATH: /home/runner/.deno/bin:$PATH
+          YTDLP_ALLOW_REMOTE_COMPONENT_DOWNLOADS: 1
         run: |
           python download.py \
             --url "${{ inputs.url }}" \
