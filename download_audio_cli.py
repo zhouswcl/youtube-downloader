@@ -10,12 +10,27 @@ if not url:
     print("Usage: download_audio.py <URL> [quality]")
     sys.exit(1)
 
-# 写出 Cookie
+# 写出 Cookie（修复 GitHub Actions 中 TAB→空格的问题）
 cookie_content = os.environ.get("YT_COOKIES", "")
-cookie_file = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
+cookie_file = None
 if cookie_content:
-    cookie_file.write(cookie_content)
-    cookie_file.close()
+    fixed_lines = []
+    for line in cookie_content.splitlines():
+        if not line.strip() or line.startswith("#"):
+            fixed_lines.append(line)
+            continue
+        parts = line.split(None, 6)
+        if len(parts) >= 7:
+            fixed_lines.append("\t".join(parts))
+        else:
+            fixed_lines.append(line)
+    
+    content = "\n".join(fixed_lines)
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
+    f.write(content)
+    f.close()
+    cookie_file = f.name
+    print(f"Cookie 已写入: {len(fixed_lines)} 行")
 
 # 直接 yt-dlp 命令行下载（绕过 Python API 格式匹配问题）
 output_dir = tempfile.mkdtemp(prefix="yt_audio_")

@@ -48,10 +48,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 检查 ffmpeg
+      - name: 检查 ffmpeg 并安装 deno（新版 yt-dlp 需要）
         run: |
           which ffmpeg || sudo apt-get update && sudo apt-get install -y ffmpeg
           ffmpeg -version | head -1
+          # 新版 yt-dlp 需要 JavaScript 运行时
+          which deno || (curl -fsSL https://deno.land/install.sh | sh 2>&1 | tail -3)
+          export DENO_DIR="$HOME/.cache/deno"
+          deno --version | head -1
 
       - name: 执行下载（音频用 yt-dlp 命令行直接处理）
         if: inputs.type == 'audio'
