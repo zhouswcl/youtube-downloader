@@ -555,98 +555,69 @@ def download_video(url: str, quality: str, output_dir: str) -> str:
 
 def download_audio(url: str, quality: str, output_dir: str) -> str:
     """下载音频并转 MP3，返回最终文件路径"""
-
-    # FFmpegExtractAudio quality: "0"=best, "5"=default, or kbps
     audio_quality = quality
     if audio_quality in ("best", "0", ""):
         audio_quality = "0"
 
-    # 第一步：提取视频信息，看看有什么格式可用
-    base_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "ignoreerrors": True,
-    }
     cookie_file = _get_cookie_file()
-    if cookie_file:
-        base_opts["cookiefile"] = cookie_file
 
-    with yt_dlp.YoutubeDL(base_opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        if info is None:
-            raise Exception("无法获取视频信息，可能 Cookie 已过期或视频需要登录")
-
-        title = info.get("title", "未知视频")
-        formats = info.get("formats", [])
-        log.info(f"视频: {title}")
-        log.info(f"可用格式数: {len(formats)}")
-
-        # 寻找最佳音频格式
-        audio_formats = [f for f in formats if f.get("acodec") and f.get("acodec") != "none"]
-        log.info(f"含音频的格式: {len(audio_formats)}")
-
-        if audio_formats:
-            # 选有最佳音频码率的
-            audio_formats.sort(key=lambda f: f.get("abr", 0) or 0, reverse=True)
-            best = audio_formats[0]
-            fmt_id = best["format_id"]
-            log.info(f"选用格式: {fmt_id} ({best.get('ext', '?')}, {best.get('abr', '?')}kbps)")
-        else:
-            # 无纯音频格式，用视频流
-            video_formats = [f for f in formats if f.get("vcodec") and f.get("vcodec") != "none"]
-            if video_formats:
-                video_formats.sort(key=lambda f: f.get("filesize", 0) or f.get("tbr", 0) or 0)
-                best = video_formats[0]
-                fmt_id = best["format_id"]
-                log.info(f"无独立音频流，选用最小视频: {fmt_id}")
-            else:
-                raise Exception("没有找到任何可下载的格式")
-
-    # 第二步：用选定的格式下载 + 转 MP3
-    ydl_opts = {
-        "format": fmt_id,
-        "outtmpl": os.path.join(output_dir, "%(title)s.%(ext)s"),
-        "progress_hooks": [report_progress],
-        "quiet": True,
-        "no_warnings": True,
-        "ignoreerrors": True,
-        "retries": 3,
-        "fragment_retries": 3,
-        "continuedl": True,
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-                "preferredquality": audio_quality,
-            }
-        ],
-    }
-    if cookie_file:
-        ydl_opts["cookiefile"] = cookie_file
-
-    log.info(f"开始下载音频 (质量: {audio_quality})...")
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
-
-    # 查找生成的 mp3 文件
-    candidates = [
-        f
-        for f in os.listdir(output_dir)
-        if f.endswith(".mp3")
+    # 尝试多种格式回退
+    formats_to_try = [
+        "bestaudio/best",
+        "bestaudio[ext=m4a]/bestaudio/best",
+        "bestvideo+bestaudio/best",
+        "worstvideo+worstaudio/worst",
     ]
-    if candidates:
-        # 按修改时间排序，取最新的
-        candidates.sort(
-            key=lambda x: os.path.getmtime(os.path.join(output_dir, x)),
-            reverse=True,
-        )
-        final_path = os.path.join(output_dir, candidates[0])
-    else:
-        final_path = ""
 
-    log.info(f"音频下载完成")
-    return final_path
+    for fmt in formats_to_try:
+        ydl_opts = {
+            "format": fmt,
+            "outtmpl": os.path.join(output_dir, "%(title)s.%(ext)s"),
+            "progress_hooks": [report_progress],
+            "quiet": True,
+            "no_warnings": True,
+            "ignoreerrors": True,
+            "retries": 3,
+            "fragment_retries": 3,
+            "continuedl": True,
+            "postprocessors": [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": "mp3",
+                    "preferredquality": audio_quality,
+                }
+            ],
+        }
+        if cookie_file:
+            ydl_opts["cookiefile"] = cookie_file
+
+        try:
+            log.info(f"尝试格式: {fmt}")
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                if info is None:
+                    continue
+                title = info.get("title", "未知视频")
+
+            # 查找生成的 mp3 文件
+            candidates = [
+                f
+                for f in os.listdir(output_dir)
+                if f.endswith(".mp3")
+            ]
+            if candidates:
+                candidates.sort(
+                    key=lambda x: os.path.getmtime(os.path.join(output_dir, x)),
+                    reverse=True,
+                )
+                final_path = os.path.join(output_dir, candidates[0])
+                log.info(f"音频下载完成: {title}")
+                return final_path
+        except Exception as e:
+            log.warning(f"格式 {fmt} 失败: {e}")
+            continue
+
+    raise Exception("所有格式尝试均失败，无法下载视频")
 
 
 def download_subtitle(url: str, output_dir: str) -> dict:
