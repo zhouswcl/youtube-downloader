@@ -554,70 +554,44 @@ def download_video(url: str, quality: str, output_dir: str) -> str:
 
 
 def download_audio(url: str, quality: str, output_dir: str) -> str:
-    """下载音频并转 MP3，返回最终文件路径"""
+    """下载音频并转 MP3，用 yt-dlp 命令行（绕过 Python API 格式问题）"""
     audio_quality = quality
     if audio_quality in ("best", "0", ""):
         audio_quality = "0"
 
+    import subprocess
+
     cookie_file = _get_cookie_file()
 
-    # 尝试多种格式回退
-    formats_to_try = [
-        "bestaudio/best",
-        "bestaudio[ext=m4a]/bestaudio/best",
-        "bestvideo+bestaudio/best",
-        "worstvideo+worstaudio/worst",
-    ]
+    cmd = ["yt-dlp"]
+    if cookie_file:
+        cmd.extend(["--cookies", cookie_file])
+    cmd.extend([
+        "-x", "--audio-format", "mp3",
+        "--audio-quality", audio_quality,
+        "-o", os.path.join(output_dir, "%(title)s.%(ext)s"),
+        "--no-playlist",
+        url,
+    ])
 
-    for fmt in formats_to_try:
-        ydl_opts = {
-            "format": fmt,
-            "outtmpl": os.path.join(output_dir, "%(title)s.%(ext)s"),
-            "progress_hooks": [report_progress],
-            "quiet": True,
-            "no_warnings": True,
-            "ignoreerrors": True,
-            "retries": 3,
-            "fragment_retries": 3,
-            "continuedl": True,
-            "postprocessors": [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": audio_quality,
-                }
-            ],
-        }
-        if cookie_file:
-            ydl_opts["cookiefile"] = cookie_file
+    log.info(f"执行: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
 
-        try:
-            log.info(f"尝试格式: {fmt}")
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                if info is None:
-                    continue
-                title = info.get("title", "未知视频")
+    if result.returncode != 0:
+        log.warning(f"yt-dlp 返回 {result.returncode}")
+        log.warning(result.stderr[:300])
+        raise Exception(f"yt-dlp 失败 (exit={result.returncode}): {result.stderr[:200]}")
 
-            # 查找生成的 mp3 文件
-            candidates = [
-                f
-                for f in os.listdir(output_dir)
-                if f.endswith(".mp3")
-            ]
-            if candidates:
-                candidates.sort(
-                    key=lambda x: os.path.getmtime(os.path.join(output_dir, x)),
-                    reverse=True,
-                )
-                final_path = os.path.join(output_dir, candidates[0])
-                log.info(f"音频下载完成: {title}")
-                return final_path
-        except Exception as e:
-            log.warning(f"格式 {fmt} 失败: {e}")
-            continue
+    # 查找生成的音频文件
+    for ext in [".mp3", ".m4a", ".opus", ".webm", ".mka"]:
+        candidates = [f for f in os.listdir(output_dir) if f.endswith(ext)]
+        if candidates:
+            candidates.sort(key=lambda x: os.path.getmtime(os.path.join(output_dir, x)), reverse=True)
+            final_path = os.path.join(output_dir, candidates[0])
+            log.info(f"音频下载完成: {os.path.basename(final_path)}")
+            return final_path
 
-    raise Exception("所有格式尝试均失败，无法下载视频")
+    raise Exception("未找到音频输出文件")
 
 
 def download_subtitle(url: str, output_dir: str) -> dict:

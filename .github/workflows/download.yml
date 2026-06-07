@@ -57,18 +57,7 @@ jobs:
           export DENO_DIR="$HOME/.cache/deno"
           deno --version | head -1
 
-      - name: 执行下载（音频用 yt-dlp 命令行直接处理）
-        if: inputs.type == 'audio'
-        env:
-          ALIYUNDRIVE_REFRESH_TOKEN: ${{ secrets.ALIYUNDRIVE_REFRESH_TOKEN }}
-          ALIYUNDRIVE_PARENT_ID: ${{ secrets.ALIYUNDRIVE_PARENT_ID }}
-          YT_COOKIES: ${{ secrets.YT_COOKIES }}
-          YT_URL: ${{ inputs.url }}
-        run: |
-          python download_audio_cli.py "${{ inputs.url }}" "${{ inputs.quality }}"
-
-      - name: 执行下载（视频/字幕用 Python 脚本）
-        if: inputs.type == 'video' || inputs.type == 'subtitle'
+      - name: 执行下载
         env:
           ALIYUNDRIVE_REFRESH_TOKEN: ${{ secrets.ALIYUNDRIVE_REFRESH_TOKEN }}
           ALIYUNDRIVE_PARENT_ID: ${{ secrets.ALIYUNDRIVE_PARENT_ID }}
