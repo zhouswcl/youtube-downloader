@@ -744,6 +744,19 @@ def download_subtitle(url: str, output_dir: str) -> dict:
     log.info(f"执行字幕提取: {' '.join(cmd)}")
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
 
+    # 如果失败，先列一下可用字幕
+    if result.returncode != 0:
+        log.warning(f"yt-dlp 返回 {result.returncode}: {result.stderr[:200]}")
+        # 用 --list-subs 看看这个视频有哪些字幕
+        list_cmd = ["yt-dlp", "--list-subs", "--no-playlist", "--user-agent", REAL_USER_AGENT]
+        if cookie_file:
+            list_cmd.extend(["--cookies", cookie_file])
+        list_cmd.append(url)
+        list_result = subprocess.run(list_cmd, capture_output=True, text=True, timeout=30)
+        log.info(f"可用字幕: {list_result.stdout[:300]}")
+        if "doesn't have any subtitles" in list_result.stdout.lower():
+            raise Exception("YouTube 没有提供可用字幕。如需语音识别生成字幕，请安装 openai-whisper 并重新运行。")
+
     # 查找下载的字幕文件
     srt_files = [f for f in os.listdir(output_dir) if f.endswith(".srt")]
     if srt_files:
