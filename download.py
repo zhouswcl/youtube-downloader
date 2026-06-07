@@ -737,6 +737,8 @@ def download_subtitle(url: str, output_dir: str) -> dict:
         "--referer", "https://www.google.com/",
         "--sleep-interval", "3",
         "--geo-bypass",
+        # 用 ios 客户端（不需要 JS 运行时）
+        "--extractor-args", "youtube:player_client=ios",
         url,
     ])
 
