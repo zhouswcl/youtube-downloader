@@ -584,6 +584,7 @@ def _build_common_opts(cookie_file: str | None = None) -> list[str]:
         "--extractor-retries", "10",
         "--throttled-rate", "100K",
         "--geo-bypass",
+        "--remote-components", "ejs:github",
         "--no-playlist",
     ])
     return opts
@@ -737,8 +738,7 @@ def download_subtitle(url: str, output_dir: str) -> dict:
         "--referer", "https://www.google.com/",
         "--sleep-interval", "3",
         "--geo-bypass",
-        # 不使用 --write-auto-subs (需要 JS 运行时)，只选手动上传的字幕
-        # 清理旧逻辑，保留干净的参数
+        "--remote-components", "ejs:github",
         url,
     ])
 
@@ -749,7 +749,7 @@ def download_subtitle(url: str, output_dir: str) -> dict:
     if result.returncode != 0:
         log.warning(f"yt-dlp 返回 {result.returncode}: {result.stderr[:200]}")
         # 用 --print subtitles 获取字幕信息（不触发 JS 挑战）
-        list_cmd = ["yt-dlp", "--print", "subtitles", "--no-playlist", "--user-agent", REAL_USER_AGENT]
+        list_cmd = ["yt-dlp", "--print", "subtitles", "--no-playlist", "--user-agent", REAL_USER_AGENT, "--remote-components", "ejs:github"]
         if cookie_file:
             list_cmd.extend(["--cookies", cookie_file])
         list_cmd.append(url)
