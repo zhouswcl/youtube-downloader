@@ -737,8 +737,8 @@ def download_subtitle(url: str, output_dir: str) -> dict:
         "--referer", "https://www.google.com/",
         "--sleep-interval", "3",
         "--geo-bypass",
-        # 用 ios 客户端（不需要 JS 运行时）
-        "--extractor-args", "youtube:player_client=ios",
+        # 不使用 --write-auto-subs (需要 JS 运行时)，只选手动上传的字幕
+        # 清理旧逻辑，保留干净的参数
         url,
     ])
 
@@ -748,8 +748,8 @@ def download_subtitle(url: str, output_dir: str) -> dict:
     # 如果失败，先列一下可用字幕
     if result.returncode != 0:
         log.warning(f"yt-dlp 返回 {result.returncode}: {result.stderr[:200]}")
-        # 用 --list-subs 看看这个视频有哪些字幕
-        list_cmd = ["yt-dlp", "--list-subs", "--no-playlist", "--user-agent", REAL_USER_AGENT]
+        # 用 --print subtitles 获取字幕信息（不触发 JS 挑战）
+        list_cmd = ["yt-dlp", "--print", "subtitles", "--no-playlist", "--user-agent", REAL_USER_AGENT]
         if cookie_file:
             list_cmd.extend(["--cookies", cookie_file])
         list_cmd.append(url)
