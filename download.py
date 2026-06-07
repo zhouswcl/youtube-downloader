@@ -21,6 +21,7 @@ import re
 import sys
 import tempfile
 import time
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
@@ -590,8 +591,6 @@ def _build_common_opts(cookie_file: str | None = None) -> list[str]:
 
 def _download_with_ytdlp(cmd: list[str], url_display: str) -> subprocess.CompletedProcess:
     """执行 yt-dlp 命令，带 429 重试循环"""
-    import subprocess
-
     log.info(f"执行: {' '.join(cmd)}")
     max_attempts = 3
     for attempt in range(1, max_attempts + 1):
@@ -618,7 +617,6 @@ def _download_with_ytdlp(cmd: list[str], url_display: str) -> subprocess.Complet
 def _try_invidious(url: str, quality: str, output_dir: str, cookie_file: str | None) -> str | None:
     """通过 Invidious 镜像下载（绕过地区限制）"""
     import random
-    import subprocess
 
     # 提取 video_id
     import re
@@ -682,8 +680,6 @@ def _try_invidious(url: str, quality: str, output_dir: str, cookie_file: str | N
 
 def download_audio(url: str, quality: str, output_dir: str) -> str:
     """下载音频并转 MP3，用 yt-dlp 命令行，带防爬 + Invidious Fallback"""
-    import subprocess
-
     audio_quality = quality
     if audio_quality in ("best", "0", ""):
         audio_quality = "0"
