@@ -623,9 +623,9 @@ def download_subtitle(url: str, output_dir: str) -> dict:
         "writesubtitles": True,
         "writeautomaticsubs": True,
         "subtitleslangs": ["zh-Hans", "zh-Hant", "en"],
-        "format": "none",  # 不选视频格式，只取字幕
         "convertsubtitles": "srt",
         "skip_download": True,
+        "extractor_args": {"youtube": {"player_client": ["web", "android"]}},
         "outtmpl": os.path.join(output_dir, "%(title)s.%(ext)s"),
     }
     cookie_file = _get_cookie_file()
