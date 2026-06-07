@@ -718,170 +718,89 @@ def download_audio(url: str, quality: str, output_dir: str) -> str:
 
 
 def download_subtitle(url: str, output_dir: str) -> dict:
-    """下载字幕（如有），否则用 Whisper 语音识别，返回结果信息"""
+    """下载字幕（如有），用 yt-dlp 命令行"""
     log.info("正在获取字幕...")
-
-    # 第一步：尝试下载 YouTube 字幕
-    ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "writesubtitles": True,
-        "writeautomaticsubs": True,
-        "subtitleslangs": ["zh-Hans", "zh-Hant", "en"],
-        "convertsubtitles": "srt",
-        "skip_download": True,
-        "extractor_args": {"youtube": {"player_client": ["web", "android"]}},
-        "outtmpl": os.path.join(output_dir, "%(title)s.%(ext)s"),
-    }
     cookie_file = _get_cookie_file()
+
+    # 用 yt-dlp CLI 下载字幕（规避 Python API 的格式转换问题）
+    cmd = ["yt-dlp"]
     if cookie_file:
-        ydl_opts["cookiefile"] = cookie_file
+        cmd.extend(["--cookies", cookie_file])
+    cmd.extend([
+        "--skip-download",
+        "--write-subs",
+        "--write-auto-subs",
+        "--sub-langs", "zh-Hans,zh-Hant,en,zh",
+        "--convert-subs", "srt",
+        "-o", os.path.join(output_dir, "%(title)s.%(ext)s"),
+        "--no-playlist",
+        "--user-agent", REAL_USER_AGENT,
+        "--referer", "https://www.google.com/",
+        "--sleep-interval", "3",
+        "--geo-bypass",
+        url,
+    ])
 
-    title = "未知视频"
-    title_base = None
-    yt_subtitles_found = False
+    log.info(f"执行字幕提取: {' '.join(cmd)}")
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            if info:
-                title = info.get("title", "未知视频")
-                safe_title = yt_dlp.YoutubeDL(ydl_opts).prepare_filename(info)
-                title_base = os.path.basename(safe_title).rsplit(".", 1)[0]
+    # 查找下载的字幕文件
+    srt_files = [f for f in os.listdir(output_dir) if f.endswith(".srt")]
+    if srt_files:
+        # 选最佳语言
+        chosen_srt = None
+        chosen_lang = "unknown"
+        for target in ["zh-Hans", "zh-Hant", "zh", "en"]:
+            matches = [f for f in srt_files if f".{target}." in f]
+            if matches:
+                chosen_srt = os.path.join(output_dir, matches[0])
+                chosen_lang = target
+                break
+        if not chosen_srt:
+            chosen_srt = os.path.join(output_dir, srt_files[0])
 
-        # 查找下载的字幕文件
-        if title_base:
-            srt_files = [
-                f for f in os.listdir(output_dir) if f.endswith(".srt") and f.startswith(title_base)
-            ]
+        # 解析字幕文件获取标题
+        title = None
+        for f in srt_files:
+            # 从文件名提取标题（去掉语言后缀和 .srt）
+            name = f.rsplit(".", 2)[0] if len(f.rsplit(".", 2)) >= 3 else f.rsplit(".", 1)[0]
+            if name:
+                title = name
+                break
 
-            if srt_files:
-                yt_subtitles_found = True
-                # 有字幕，选择最佳语言
-                chosen_srt = None
-                chosen_lang = "unknown"
-                for target in ["zh-Hans", "zh-Hant", "en"]:
-                    matches = [f for f in srt_files if f".{target}." in f]
-                    if matches:
-                        chosen_srt = os.path.join(output_dir, matches[0])
-                        chosen_lang = target
-                        break
-                if not chosen_srt:
-                    chosen_srt = os.path.join(output_dir, srt_files[0])
-                    parts = os.path.basename(chosen_srt).rsplit(".", 2)
-                    chosen_lang = parts[-2] if len(parts) >= 3 else "unknown"
+        log.info(f"找到 YouTube 字幕 (语言: {chosen_lang})")
 
-                log.info(f"找到 YouTube 字幕 (语言: {chosen_lang})")
+        # 保存 .txt 版本（纯文本）
+        segments = parse_srt(chosen_srt)
+        if segments:
+            txt_path = chosen_srt.replace(".srt", ".txt")
+            write_txt(segments, txt_path)
+        else:
+            txt_path = ""
 
-                # 解析 + 翻译
-                segments = parse_srt(chosen_srt)
-                if not segments:
-                    raise Exception(f"字幕文件解析失败: {chosen_srt}")
-
-                translated = False
-                if not chosen_lang.startswith("zh"):
-                    log.info("正在翻译字幕为中文...")
-                    segments = translate_segments(segments, chosen_lang)
-                    translated = True
-
-                # 保存 .srt
-                srt_output = os.path.join(output_dir, f"{title_base}.zh-Hans.srt")
-                write_srt(segments, srt_output)
-
-                # 保存 .txt
-                txt_output = os.path.join(output_dir, f"{title_base}.zh-Hans.txt")
-                write_txt(segments, txt_output)
-
-                # 清理临时字幕文件
-                for f in srt_files:
-                    fp = os.path.join(output_dir, f)
-                    if fp != srt_output:
-                        try:
-                            os.remove(fp)
-                        except OSError:
-                            pass
-
-                return {
-                    "title": title,
-                    "srt_file": srt_output,
-                    "txt_file": txt_output,
-                    "source_lang": chosen_lang,
-                    "translated": translated,
-                    "from_speech": False,
-                }
-    except Exception as e:
-        log.warning(f"YouTube 字幕提取失败: {e}，尝试 Whisper 语音识别...")
-        # 回退到 Whisper
-
-    # 第二步：没有字幕 → 尝试 Whisper 语音识别
-    if WHISPER_AVAILABLE:
-        log.info("YouTube 无字幕，尝试 Whisper 语音识别...")
-
-        # 下载音频
-        audio_path = os.path.join(output_dir, f"tmp_audio_{int(time.time())}.mp3")
-        audio_opts = {
-            "format": "bestaudio/best",
-            "outtmpl": audio_path,
-            "postprocessors": [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "128",
-                }
-            ],
-            "quiet": True,
-            "no_warnings": True,
-        }
-        with yt_dlp.YoutubeDL(audio_opts) as ydl:
-            ydl.extract_info(url, download=True)
-
-        # 查找实际生成的音频文件
-        actual_audio = audio_path
-        if not os.path.isfile(actual_audio):
-            candidates = [f for f in os.listdir(output_dir) if f.endswith(".mp3")]
-            if candidates:
-                actual_audio = os.path.join(output_dir, candidates[0])
-
-        if not os.path.isfile(actual_audio):
-            raise Exception("音频文件下载失败")
-
-        log.info("正在进行语音识别...")
-        segments = whisper_transcribe(actual_audio)
-
-        if not segments:
-            raise Exception("语音识别未能生成有效文本")
-
-        # 保存字幕
-        safe_title = re.sub(r"[^\w\s-]", "", title).strip()[:80]
-        safe_title = re.sub(r"[-\s]+", "_", safe_title)
-        title_base = safe_title or f"whisper_{int(time.time())}"
-
-        srt_output = os.path.join(output_dir, f"{title_base}.zh-Hans.srt")
-        write_srt(segments, srt_output)
-
-        txt_output = os.path.join(output_dir, f"{title_base}.zh-Hans.txt")
-        write_txt(segments, txt_output)
-
-        # 清理临时音频
-        if os.path.isfile(actual_audio):
-            try:
-                os.remove(actual_audio)
-            except OSError:
-                pass
+        # 清理多余的字幕文件，只保留最佳语言
+        for f in srt_files:
+            fp = os.path.join(output_dir, f)
+            if fp != chosen_srt:
+                try:
+                    os.remove(fp)
+                except OSError:
+                    pass
 
         return {
-            "title": title,
-            "srt_file": srt_output,
-            "txt_file": txt_output,
-            "source_lang": "zh-Hans",
+            "success": True,
+            "title": title or "未知视频",
+            "srt_file": chosen_srt,
+            "txt_file": txt_path if segments else "",
+            "source_lang": chosen_lang,
             "translated": False,
-            "from_speech": True,
+            "from_speech": False,
         }
 
-    raise Exception(
-        "YouTube 没有提供可用字幕。"
-        "如需语音识别生成字幕，请安装 openai-whisper 并重新运行。"
-    )
+    # 无字幕
+    if result.returncode != 0:
+        log.warning(f"yt-dlp 返回 {result.returncode}: {result.stderr[:200]}")
+    raise Exception("YouTube 没有提供可用字幕。如需语音识别生成字幕，请安装 openai-whisper 并重新运行。")
 
 
 # ── 主入口 ───────────────────────────────────────────────────────────
