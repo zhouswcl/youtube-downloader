@@ -65,6 +65,35 @@ def main():
                 print(f"  {line}")
         print(f"  Exit code: {result.returncode}")
 
+    # 测试3: 跳过 webpage 和 configs （可能绕过更多限制）
+    for skip_flag in ["webpage,configs", "webpage,configs,js", "webpage"]:
+        print(f"\n=== Test 3: player_skip={skip_flag} ===")
+        cmd = [
+            "yt-dlp", "--verbose", "--no-download", "--geo-bypass",
+            "--extractor-args", f"youtube:player_skip={skip_flag}",
+        ]
+        if cookie_file:
+            cmd.extend(["--cookies", cookie_file])
+        cmd.append(args.url)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        for line in result.stderr.splitlines():
+            if any(kw in line.lower() for kw in ["error", "warning", "unavailable", "format", "playability", "success"]):
+                print(f"  {line}")
+        print(f"  Exit code: {result.returncode}")
+
+    # 测试4: 无 Cookie + android 客户端
+    print("\n=== Test 4: no cookies + android client ===")
+    cmd = [
+        "yt-dlp", "--verbose", "--no-download",
+        "--extractor-args", "youtube:player_client=android",
+        args.url,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    for line in result.stderr.splitlines():
+        if any(kw in line.lower() for kw in ["error", "warning", "unavailable", "format", "playability"]):
+            print(f"  {line}")
+    print(f"  Exit code: {result.returncode}")
+
     # 清理
     if cookie_file:
         os.unlink(cookie_file)
