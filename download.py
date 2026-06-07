@@ -874,20 +874,27 @@ def main():
 
         # ── 上传到阿里云盘 ──────────────────────────────────
         if not args.no_upload:
-            upload_target = ""
 
             if args.type in ("video", "audio"):
-                upload_target = result.get("file_path", "")
+                upload_targets = []
+                fp = result.get("file_path", "")
+                if fp and os.path.isfile(fp):
+                    upload_targets.append(fp)
             elif args.type == "subtitle":
-                # 字幕类型上传 .srt 文件
-                upload_target = result.get("srt_file", "")
+                # 字幕类型：上传 .srt 和 .txt 两个文件
+                upload_targets = []
+                srt_file = result.get("srt_file", "")
+                txt_file = result.get("txt_file", "")
+                if srt_file and os.path.isfile(srt_file):
+                    upload_targets.append(srt_file)
+                if txt_file and os.path.isfile(txt_file):
+                    upload_targets.append(txt_file)
 
-            if upload_target and os.path.isfile(upload_target):
+            if upload_targets:
                 # 处理 --upload-folder: 根据名称查找文件夹 ID
                 resolved_parent_id = None
                 if args.upload_folder:
                     log.info(f"📂 查找阿里云盘文件夹: {args.upload_folder}")
-                    # 先登录获取 access_token
                     import requests as req
                     refresh_token = os.environ.get("ALIYUNDRIVE_REFRESH_TOKEN", "")
                     if refresh_token:
@@ -909,15 +916,19 @@ def main():
                                 else:
                                     log.warning(f"⚠ 未找到文件夹 '{args.upload_folder}'，上传到默认目录")
 
-                upload_result = upload_to_aliyundrive(upload_target, parent_id=resolved_parent_id)
-                result["upload"] = upload_result
-                if upload_result.get("success"):
-                    log.info(f"✓ 文件已上传到阿里云盘")
-                else:
-                    log.warning(f"⚠ 上传失败: {upload_result.get('error', '未知错误')}")
+                for target in upload_targets:
+                    upload_result = upload_to_aliyundrive(target, parent_id=resolved_parent_id)
+                    result["upload"] = result.get("upload", [])
+                    if isinstance(result["upload"], dict):
+                        result["upload"] = [result["upload"]]
+                    result["upload"].append(upload_result)
+                    if upload_result.get("success"):
+                        log.info(f"✓ 上传成功: {os.path.basename(target)}")
+                    else:
+                        log.warning(f"⚠ 上传失败: {os.path.basename(target)}: {upload_result.get('error', '')}")
             else:
                 log.warning("⚠ 未找到可上传的文件")
-                result["upload"] = {"success": False, "error": "文件不存在"}
+                result["upload"] = [{"success": False, "error": "文件不存在"}]
         else:
             result["upload"] = {"skipped": True}
 
@@ -934,12 +945,19 @@ def main():
             else:
                 log.info(f"  字幕: {result.get('srt_file', '')}")
                 log.info(f"  文本: {result.get('txt_file', '')}")
-            if result.get("upload", {}).get("success"):
-                log.info("  上传: ✓ 已上传到阿里云盘")
-            elif result.get("upload", {}).get("skipped"):
+            uploads = result.get("upload", [])
+            if isinstance(uploads, dict):
+                uploads = [uploads]
+            success_count = sum(1 for u in uploads if isinstance(u, dict) and u.get("success"))
+            skip = any(u.get("skipped") for u in uploads if isinstance(u, dict))
+            fail_count = sum(1 for u in uploads if isinstance(u, dict) and u.get("error"))
+            if success_count > 0:
+                log.info(f"  上传: ✓ {success_count} 个文件已上传到阿里云盘")
+            elif skip:
                 log.info("  上传: - 已跳过 (--no-upload)")
-            else:
-                log.info(f"  上传: ✗ 失败 - {result.get('upload', {}).get('error', '')}")
+            elif fail_count > 0:
+                errors = [u.get("error","") for u in uploads if isinstance(u, dict) and u.get("error")]
+                log.info(f"  上传: ✗ {'; '.join(errors)}")
 
     except Exception as e:
         log.error(f"任务失败: {e}")
