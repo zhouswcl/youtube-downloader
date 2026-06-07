@@ -553,66 +553,172 @@ def download_video(url: str, quality: str, output_dir: str) -> str:
         return final_path
 
 
-def download_audio(url: str, quality: str, output_dir: str) -> str:
-    """下载音频并转 MP3，用 yt-dlp 命令行（绕过 Python API 格式问题）"""
-    audio_quality = quality
-    if audio_quality in ("best", "0", ""):
-        audio_quality = "0"
+REAL_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/125.0.0.0 Safari/537.36"
+)
 
-    import subprocess
+INVIDIOUS_INSTANCES = [
+    "https://inv.nadeko.net",
+    "https://invidious.fdn.fr",
+    "https://yewtu.be",
+    "https://invidious.snapdragon.dev",
+    "https://inv.bp.projectsegfau.lt",
+]
 
-    cookie_file = _get_cookie_file()
 
-    cmd = ["yt-dlp"]
+def _build_common_opts(cookie_file: str | None = None) -> list[str]:
+    """返回 yt-dlp 通用防爬参数（不含 url）"""
+    opts = []
     if cookie_file:
-        cmd.extend(["--cookies", cookie_file])
-    cmd.extend([
-        "-x", "--audio-format", "mp3",
-        "--audio-quality", audio_quality,
-        "-o", os.path.join(output_dir, "%(title)s.%(ext)s"),
-        "--no-playlist",
-        # 限流/重试参数 — 应对 HTTP 429 Too Many Requests
-        "--sleep-interval", "5",
-        "--max-sleep-interval", "30",
+        opts.extend(["--cookies", cookie_file])
+    opts.extend([
+        "--user-agent", REAL_USER_AGENT,
+        "--referer", "https://www.google.com/",
+        "--sleep-interval", "10",
+        "--max-sleep-interval", "20",
         "--retries", "10",
         "--fragment-retries", "10",
         "--extractor-retries", "10",
         "--throttled-rate", "100K",
-        # 地区限制绕过 — 视频可能仅限中国区域观看
         "--geo-bypass",
-        url,
+        "--no-playlist",
     ])
+    return opts
+
+
+def _download_with_ytdlp(cmd: list[str], url_display: str) -> subprocess.CompletedProcess:
+    """执行 yt-dlp 命令，带 429 重试循环"""
+    import subprocess
 
     log.info(f"执行: {' '.join(cmd)}")
-    # 带重试循环，应对 429 等临时错误
     max_attempts = 3
     for attempt in range(1, max_attempts + 1):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         if result.returncode == 0:
-            break
-        if "HTTP Error 429" in result.stderr:
+            return result
+        stderr = result.stderr
+        if "HTTP Error 429" in stderr:
             wait = attempt * 30
             log.warning(f"收到 429 限流，等待 {wait} 秒后重试 (第 {attempt}/{max_attempts} 次)...")
             time.sleep(wait)
             continue
+        # Invidious fallback: 直接 YouTube 失败时，尝试通过 Invidious 镜像下载
+        if "Video unavailable" in stderr or "playability status" in stderr:
+            log.warning(f"直接 YouTube 下载失败，将尝试 Invidious 镜像...")
+            return result  # 交给上层处理 fallback
         # 其他错误直接报
         log.warning(f"yt-dlp 返回 {result.returncode}")
-        log.warning(result.stderr[:300])
-        raise Exception(f"yt-dlp 失败 (exit={result.returncode}): {result.stderr[:200]}")
-    else:
-        raise Exception(f"yt-dlp 失败（所有重试耗尽）: {result.stderr[:500]}")
-    # 处理成功情况
+        log.warning(stderr[:300])
+        raise Exception(f"yt-dlp 失败 (exit={result.returncode}): {stderr[:200]}")
+    raise Exception(f"yt-dlp 失败（所有重试耗尽）: {result.stderr[:500]}")
 
-    # 查找生成的音频文件
-    for ext in [".mp3", ".m4a", ".opus", ".webm", ".mka"]:
-        candidates = [f for f in os.listdir(output_dir) if f.endswith(ext)]
-        if candidates:
-            candidates.sort(key=lambda x: os.path.getmtime(os.path.join(output_dir, x)), reverse=True)
-            final_path = os.path.join(output_dir, candidates[0])
-            log.info(f"音频下载完成: {os.path.basename(final_path)}")
-            return final_path
 
-    raise Exception("未找到音频输出文件")
+def _try_invidious(url: str, quality: str, output_dir: str, cookie_file: str | None) -> str | None:
+    """通过 Invidious 镜像下载（绕过地区限制）"""
+    import random
+    import subprocess
+
+    # 提取 video_id
+    import re
+    m = re.search(r"(?:v=|youtu\.be/)([a-zA-Z0-9_-]{11})", url)
+    if not m:
+        return None
+    video_id = m.group(1)
+
+    # 随机尝试镜像列表
+    instances = INVIDIOUS_INSTANCES.copy()
+    random.shuffle(instances)
+
+    for instance in instances:
+        invidious_url = f"{instance}/watch?v={video_id}"
+        log.info(f"尝试 Invidious 镜像: {instance}")
+
+        # 先测试镜像是否可用（快速 info 请求）
+        test_cmd = ["yt-dlp", "--no-download", "--quiet"]
+        if cookie_file:
+            test_cmd.extend(["--cookies", cookie_file])
+        test_cmd.append(invidious_url)
+
+        test_result = subprocess.run(test_cmd, capture_output=True, text=True, timeout=30)
+        if test_result.returncode != 0:
+            log.warning(f"  镜像不可用: {test_result.stderr[:100]}")
+            continue
+
+        # 镜像可用，执行下载
+        dl_cmd = ["yt-dlp"]
+        if cookie_file:
+            dl_cmd.extend(["--cookies", cookie_file])
+        dl_cmd.extend([
+            "-x", "--audio-format", "mp3",
+            "--audio-quality", quality,
+            "-o", os.path.join(output_dir, "%(title)s.%(ext)s"),
+            "--no-playlist",
+            "--user-agent", REAL_USER_AGENT,
+            "--referer", instance + "/",
+            "--retries", "5",
+            "--fragment-retries", "5",
+            invidious_url,
+        ])
+
+        log.info(f"通过 Invidious 下载: {instance}")
+        result = subprocess.run(dl_cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode == 0:
+            # 查找生成的音频文件
+            for ext in [".mp3", ".m4a", ".opus", ".webm", ".mka"]:
+                candidates = [f for f in os.listdir(output_dir) if f.endswith(ext)]
+                if candidates:
+                    candidates.sort(key=lambda x: os.path.getmtime(os.path.join(output_dir, x)), reverse=True)
+                    final_path = os.path.join(output_dir, candidates[0])
+                    log.info(f"Invidious 下载成功: {os.path.basename(final_path)}")
+                    return final_path
+            log.warning("Invidious 下载完成但未找到文件")
+        else:
+            log.warning(f"Invidious {instance} 下载失败")
+
+    return None
+
+
+def download_audio(url: str, quality: str, output_dir: str) -> str:
+    """下载音频并转 MP3，用 yt-dlp 命令行，带防爬 + Invidious Fallback"""
+    import subprocess
+
+    audio_quality = quality
+    if audio_quality in ("best", "0", ""):
+        audio_quality = "0"
+
+    cookie_file = _get_cookie_file()
+    common_opts = _build_common_opts(cookie_file)
+
+    # 第一步：直接 YouTube 下载
+    cmd = ["yt-dlp"] + common_opts + [
+        "-x", "--audio-format", "mp3",
+        "--audio-quality", audio_quality,
+        "-o", os.path.join(output_dir, "%(title)s.%(ext)s"),
+        url,
+    ]
+
+    result = _download_with_ytdlp(cmd, url)
+    if result.returncode == 0:
+        # 查找文件
+        for ext in [".mp3", ".m4a", ".opus", ".webm", ".mka"]:
+            candidates = [f for f in os.listdir(output_dir) if f.endswith(ext)]
+            if candidates:
+                candidates.sort(key=lambda x: os.path.getmtime(os.path.join(output_dir, x)), reverse=True)
+                final_path = os.path.join(output_dir, candidates[0])
+                log.info(f"音频下载完成: {os.path.basename(final_path)}")
+                return final_path
+
+    # 第二步：YouTube 直接失败 → 尝试 Invidious 镜像
+    log.info("YouTube 直连失败，尝试通过 Invidious 镜像下载...")
+    invidious_path = _try_invidious(url, audio_quality, output_dir, cookie_file)
+    if invidious_path:
+        return invidious_path
+
+    # 全部失败
+    stderr = result.stderr if result.returncode != 0 else "文件未找到"
+    raise Exception(f"yt-dlp 失败 (exit={result.returncode}): {stderr[:500]}")
 
 
 def download_subtitle(url: str, output_dir: str) -> dict:
